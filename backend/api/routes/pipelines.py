@@ -1,142 +1,123 @@
-from typing import Any, Dict, List
-from fastapi import APIRouter, Body, Depends, HTTPException, status
-from backend.database import get_pg_connection
-from backend.api.routes.auth import get_current_user_claims
+from typing import List, Dict, Any, Optional
+from fastapi import APIRouter, Body, Depends, status, Request
+from backend.api.deps import get_db, check_write_permission
+from backend.schemas.pipelines import (
+    SourceRequest,
+    SourceResponse,
+    DestinationRequest,
+    DestinationResponse,
+    ConnectionRequest,
+    ConnectionResponse,
+    LogRequest,
+    LogResponse,
+    ActivePipelineResponse,
+    SyncTriggerResponse,
+    TaskStatusResponse,
+    AuthDriverRequest,
+    AuthDriverResponse,
+    ActiveSchemaResponse,
+    DeleteResponse
+)
 from backend.services.pipeline_service import PipelineService
-
-pipeline_service = PipelineService()
+from sqlalchemy.orm import Session
 
 router = APIRouter()
 
-def get_conn():
-    conn = get_pg_connection()
-    try:
-        yield conn
-    finally:
-        conn.close()
+def get_pipeline_service(request: Request, db: Session = Depends(get_db)) -> PipelineService:
+    return PipelineService(db, request.state.tenant_id)
 
-def _check_tenant_id(claims: dict) -> str:
-    tenant_id = claims.get("tenant_id")
-    if not tenant_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized: tenant_id is missing.")
-    return tenant_id
+@router.get("/sources", response_model=List[SourceResponse])
+async def list_sources(pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.read_tenant_rows("sources")
 
-@router.get("/sources")
-async def list_sources(claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> List[Dict[str, Any]]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.read_tenant_rows(conn, "sources", tenant_id)
+@router.get("/sources/{id}", response_model=SourceResponse)
+async def get_source(id: str, pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.read_tenant_row("sources", id)
 
-@router.get("/sources/{id}")
-async def get_source(id: str, claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> Dict[str, Any]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.read_tenant_row(conn, "sources", tenant_id, id)
+@router.post("/sources", response_model=SourceResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(check_write_permission)])
+async def save_source(payload: SourceRequest, pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.upsert_tenant_row("sources", payload.model_dump())
 
-@router.post("/sources", status_code=status.HTTP_201_CREATED)
-async def save_source(payload: Dict[str, Any] = Body(...), claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> Dict[str, Any]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.upsert_tenant_row(conn, "sources", tenant_id, payload)
+@router.put("/sources/{id}", response_model=SourceResponse, dependencies=[Depends(check_write_permission)])
+async def update_source(id: str, payload: SourceRequest, pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.update_tenant_row("sources", id, payload.model_dump())
 
-@router.put("/sources/{id}")
-async def update_source(id: str, payload: Dict[str, Any] = Body(...), claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> Dict[str, Any]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.update_tenant_row(conn, "sources", tenant_id, id, payload)
+@router.delete("/sources/{id}", response_model=DeleteResponse, dependencies=[Depends(check_write_permission)])
+async def delete_source(id: str, pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.delete_tenant_row("sources", id)
 
-@router.delete("/sources/{id}")
-async def delete_source(id: str, claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> Dict[str, str]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.delete_tenant_row(conn, "sources", tenant_id, id)
+@router.get("/destinations", response_model=List[DestinationResponse])
+async def list_destinations(pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.read_tenant_rows("destinations")
 
-@router.get("/destinations")
-async def list_destinations(claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> List[Dict[str, Any]]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.read_tenant_rows(conn, "destinations", tenant_id)
+@router.get("/destinations/{id}", response_model=DestinationResponse)
+async def get_destination(id: str, pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.read_tenant_row("destinations", id)
 
-@router.get("/destinations/{id}")
-async def get_destination(id: str, claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> Dict[str, Any]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.read_tenant_row(conn, "destinations", tenant_id, id)
+@router.post("/destinations", response_model=DestinationResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(check_write_permission)])
+async def save_destination(payload: DestinationRequest, pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.upsert_tenant_row("destinations", payload.model_dump())
 
-@router.post("/destinations", status_code=status.HTTP_201_CREATED)
-async def save_destination(payload: Dict[str, Any] = Body(...), claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> Dict[str, Any]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.upsert_tenant_row(conn, "destinations", tenant_id, payload)
+@router.put("/destinations/{id}", response_model=DestinationResponse, dependencies=[Depends(check_write_permission)])
+async def update_destination(id: str, payload: DestinationRequest, pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.update_tenant_row("destinations", id, payload.model_dump())
 
-@router.put("/destinations/{id}")
-async def update_destination(id: str, payload: Dict[str, Any] = Body(...), claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> Dict[str, Any]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.update_tenant_row(conn, "destinations", tenant_id, id, payload)
+@router.delete("/destinations/{id}", response_model=DeleteResponse, dependencies=[Depends(check_write_permission)])
+async def delete_destination(id: str, pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.delete_tenant_row("destinations", id)
 
-@router.delete("/destinations/{id}")
-async def delete_destination(id: str, claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> Dict[str, str]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.delete_tenant_row(conn, "destinations", tenant_id, id)
+@router.get("/connections", response_model=List[ConnectionResponse])
+async def list_connections(pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.read_tenant_rows("connections")
 
-@router.get("/connections")
-async def list_connections(claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> List[Dict[str, Any]]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.read_tenant_rows(conn, "connections", tenant_id)
+@router.get("/connections/{id}", response_model=ConnectionResponse)
+async def get_connection(id: str, pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.read_tenant_row("connections", id)
 
-@router.get("/connections/{id}")
-async def get_connection(id: str, claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> Dict[str, Any]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.read_tenant_row(conn, "connections", tenant_id, id)
+@router.post("/connections", response_model=ConnectionResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(check_write_permission)])
+async def save_connection(payload: ConnectionRequest, pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.upsert_tenant_row("connections", payload.model_dump())
 
-@router.post("/connections", status_code=status.HTTP_201_CREATED)
-async def save_connection(payload: Dict[str, Any] = Body(...), claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> Dict[str, Any]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.upsert_tenant_row(conn, "connections", tenant_id, payload)
+@router.put("/connections/{id}", response_model=ConnectionResponse, dependencies=[Depends(check_write_permission)])
+async def update_connection(id: str, payload: ConnectionRequest, pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.update_tenant_row("connections", id, payload.model_dump())
 
-@router.put("/connections/{id}")
-async def update_connection(id: str, payload: Dict[str, Any] = Body(...), claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> Dict[str, Any]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.update_tenant_row(conn, "connections", tenant_id, id, payload)
+@router.delete("/connections/{id}", response_model=DeleteResponse, dependencies=[Depends(check_write_permission)])
+async def delete_connection(id: str, pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.delete_tenant_row("connections", id)
 
-@router.delete("/connections/{id}")
-async def delete_connection(id: str, claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> Dict[str, str]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.delete_tenant_row(conn, "connections", tenant_id, id)
+@router.get("/logs", response_model=List[LogResponse])
+async def list_logs(pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.read_tenant_rows("logs")
 
-@router.get("/logs")
-async def list_logs(claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> List[Dict[str, Any]]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.read_tenant_rows(conn, "logs", tenant_id)
+@router.post("/logs", response_model=LogResponse, status_code=status.HTTP_201_CREATED)
+async def save_log(payload: LogRequest, pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.save_log(payload.model_dump())
 
-@router.post("/logs", status_code=status.HTTP_201_CREATED)
-async def save_log(payload: Dict[str, Any] = Body(...), claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> Dict[str, Any]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.save_log(conn, tenant_id, payload)
+@router.get("/active", response_model=List[ActivePipelineResponse])
+async def active_pipelines(pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.get_active_pipelines()
 
-@router.get("/active")
-async def active_pipelines(claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> List[Dict[str, Any]]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.get_active_pipelines(conn, tenant_id)
-
-@router.post("/{id}/sync", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/{id}/sync", response_model=SyncTriggerResponse, status_code=status.HTTP_202_ACCEPTED)
 async def trigger_pipeline_sync(
     id: str,
-    pipeline_config: Dict[str, Any] | None = Body(default=None),
-    claims: dict = Depends(get_current_user_claims),
-    conn = Depends(get_conn)
-) -> Dict[str, Any]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.trigger_pipeline_sync(conn, tenant_id, id, pipeline_config)
+    pipeline_config: Optional[Dict[str, Any]] = Body(default=None),
+    pipeline_service: PipelineService = Depends(get_pipeline_service)
+):
+    return pipeline_service.trigger_pipeline_sync(id, pipeline_config)
 
-@router.get("/tasks/{task_id}")
-async def get_task_status(task_id: str, claims: dict = Depends(get_current_user_claims), conn = Depends(get_conn)) -> Dict[str, Any]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.get_task_status(conn, tenant_id, task_id)
+@router.get("/tasks/{task_id}", response_model=TaskStatusResponse)
+async def get_task_status(task_id: str, pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.get_task_status(task_id)
 
-@router.post("/{id}/auth-driver")
+@router.post("/{id}/auth-driver", response_model=AuthDriverResponse, dependencies=[Depends(check_write_permission)])
 async def save_auth_driver(
     id: str,
-    payload: Dict[str, str] = Body(...),
-    claims: dict = Depends(get_current_user_claims),
-    conn = Depends(get_conn)
-) -> Dict[str, str]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.save_auth_driver(conn, tenant_id, id, payload.get("code", ""))
+    payload: AuthDriverRequest,
+    pipeline_service: PipelineService = Depends(get_pipeline_service)
+):
+    return pipeline_service.save_auth_driver(id, payload.code)
 
-@router.get("/active/schema")
-async def get_active_schema(claims: dict = Depends(get_current_user_claims)) -> Dict[str, List[str]]:
-    tenant_id = _check_tenant_id(claims)
-    return pipeline_service.get_active_schema(tenant_id)
+@router.get("/active/schema", response_model=ActiveSchemaResponse)
+async def get_active_schema(pipeline_service: PipelineService = Depends(get_pipeline_service)):
+    return pipeline_service.get_active_schema()
