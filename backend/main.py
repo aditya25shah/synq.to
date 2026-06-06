@@ -44,7 +44,35 @@ def on_startup():
     from backend.database.database import engine, SessionLocal
     from backend.models import Base
     from backend.services.auth_service import AuthService
-    from sqlalchemy import text
+    from backend.config import settings
+    from sqlalchemy import create_engine, text
+    import urllib.parse
+
+    try:
+        host = settings.POSTGRES_SERVER
+        if host.lower() in ("localhost", "127.0.0.1", "::1") and settings.POSTGRES_DOCKER_HOST:
+            host = settings.POSTGRES_DOCKER_HOST
+
+        escaped_user = urllib.parse.quote_plus(settings.POSTGRES_USER)
+        escaped_password = urllib.parse.quote_plus(settings.POSTGRES_PASSWORD)
+        default_db_uri = f"postgresql+psycopg://{escaped_user}:{escaped_password}@{host}:{settings.POSTGRES_PORT}/postgres"
+        
+        temp_engine = create_engine(default_db_uri, isolation_level="AUTOCOMMIT")
+        with temp_engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT 1 FROM pg_database WHERE datname = :dbname"),
+                {"dbname": settings.POSTGRES_DB}
+            )
+            exists = result.scalar() is not None
+            if not exists:
+                logger.info(f"Database '{settings.POSTGRES_DB}' does not exist. Creating...")
+                safe_db_name = settings.POSTGRES_DB.replace('"', '""')
+                conn.execute(text(f'CREATE DATABASE "{safe_db_name}"'))
+                logger.info(f"Database '{settings.POSTGRES_DB}' created successfully.")
+        temp_engine.dispose()
+    except Exception as exc:
+        logger.error(f"Failed to ensure database '{settings.POSTGRES_DB}' exists: {str(exc)}")
+
     try:
         with engine.connect() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
